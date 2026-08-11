@@ -1,3 +1,11 @@
+use std::fs;
+use std::io::{self, Write};
+use std::path::Path;
+
+// ==========================================
+// 1. STRUCT & IMPL BLOCK (Requirement: OOP)
+// ==========================================
+
 /// Encapsulates cryptographic configuration and key material.
 pub struct CipherEngine {
     key: String,
@@ -20,25 +28,22 @@ impl CipherEngine {
         self.key.len()
     }
 
-    /// REFERENCE EXAMPLE (&[u8]):
-    /// Inspects byte slice data without taking ownership.
-    /// Demonstrates: Immutable variables, expressions (match), loops.
+    /// REFERENCE & SLICING EXAMPLE:
+    /// Inspects key validity using a byte slice.
     pub fn validate_key(&self) -> bool {
-        let min_length = 4; // Immutable variable
-        let key_len = self.get_key_length();
+        let key_bytes = self.key.as_bytes();
+        let min_length = 4;
 
-        // Expression statement evaluating condition
-        let is_valid = if key_len >= min_length {
-            true
-        } else {
-            false
-        };
+        if key_bytes.len() < min_length {
+            return false;
+        }
 
-        is_valid
+        // Requirement: Slicing (inspects prefix slice)
+        let prefix_slice = &key_bytes[0..4];
+        !prefix_slice.is_empty()
     }
 
     /// OWNERSHIP EXAMPLE (Takes Vec<u8> by value):
-    /// Transforms an input byte buffer using XOR cipher logic.
     /// Consumes `data` and returns a newly mutated owned `Vec<u8>`.
     pub fn process_bytes(&self, mut data: Vec<u8>) -> Vec<u8> {
         let key_bytes = self.key.as_bytes();
@@ -60,45 +65,98 @@ impl CipherEngine {
     }
 }
 
-// Main function to test how Rust handles ownership moves versus borrowed references
+// ==========================================
+// 2. FILE I/O HELPERS (Requirement: Functions)
+// ==========================================
+
+/// Reads raw byte buffer from a given file path.
+pub fn read_file_bytes(file_path: &str) -> io::Result<Vec<u8>> {
+    let path = Path::new(file_path);
+    fs::read(path)
+}
+
+/// Writes processed byte buffer back to a file.
+pub fn write_file_bytes(file_path: &str, data: &[u8]) -> io::Result<()> {
+    let path = Path::new(file_path);
+    fs::write(path, data)
+}
+
+// Helper to handle interactive terminal prompts
+fn get_user_input(prompt: &str) -> String {
+    print!("{}", prompt);
+    io::stdout().flush().unwrap();
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).expect("Failed to read input");
+    input.trim().to_string()
+}
+
+// ==========================================
+// 3. MAIN INTERACTIVE CLI
+// ==========================================
 
 fn main() {
-    println!("=== Testing CipherEngine & Ownership Rules ===");
+    println!("============================================");
+    println!("     CLI FILE ENCRYPTION & DECRYPTION      ");
+    println!("============================================");
 
-    // 1. Create an owned String key
-    let secret_key = String::from("SecretKey123");
+    loop {
+        println!("\nSelect an action:");
+        println!("1. Encrypt / Decrypt a File");
+        println!("2. Run Verification Test");
+        println!("3. Exit");
 
-    // 2. Pass ownership of `secret_key` into `CipherEngine::new`
-    let engine = CipherEngine::new(secret_key, 1);
+        let choice = get_user_input("\nEnter choice (1, 2, or 3): ");
 
-    // UNCOMMENTING THIS LINE WILL CAUSE A COMPILER ERROR:
-    // println!("Key was: {}", secret_key); 
-    // Reason: `secret_key` was MOVED into `engine` and is no longer valid in main's scope.
+        match choice.as_str() {
+            "1" => {
+                let file_path = get_user_input("Enter target file path (e.g. sample.txt): ");
 
-    // 3. Borrow reference (&engine) to validate key
-    if engine.validate_key() {
-        println!("CipherEngine initialized with key length: {}", engine.get_key_length());
-    } else {
-        println!("Warning: Key is too short!");
-        return;
+                if !Path::new(&file_path).exists() {
+                    println!("[!] Error: File '{}' does not exist!", file_path);
+                    continue;
+                }
+
+                let secret_key = get_user_input("Enter encryption key (min 4 chars): ");
+                let engine = CipherEngine::new(secret_key, 1);
+
+                if !engine.validate_key() {
+                    println!("[!] Error: Key length must be at least 4 characters!");
+                    continue;
+                }
+
+                let output_path = get_user_input("Enter output file path (e.g. encrypted.bin): ");
+
+                match read_file_bytes(&file_path) {
+                    Ok(raw_bytes) => {
+                        println!("[+] Processing {} bytes...", raw_bytes.len());
+                        let transformed_bytes = engine.process_bytes(raw_bytes);
+
+                        if let Err(e) = write_file_bytes(&output_path, &transformed_bytes) {
+                            println!("[!] Write Error: {}", e);
+                        } else {
+                            println!("[✓] Success! Processed file saved to '{}'", output_path);
+                        }
+                    }
+                    Err(e) => println!("[!] Read Error: {}", e),
+                }
+            }
+            "2" => {
+                println!("\n--- Running Internal Test ---");
+                let test_key = String::from("SecretKey123");
+                let test_engine = CipherEngine::new(test_key, 1);
+                let sample_data = String::from("Hello, Security World!").into_bytes();
+
+                println!("Original Bytes:  {:?}", sample_data);
+                let encrypted = test_engine.process_bytes(sample_data);
+                println!("Encrypted Bytes: {:?}", encrypted);
+                let decrypted = test_engine.process_bytes(encrypted);
+                println!("Restored Text:   '{}'", String::from_utf8_lossy(&decrypted));
+            }
+            "3" => {
+                println!("Exiting application. Goodbye!");
+                break;
+            }
+            _ => println!("[!] Invalid choice. Please pick 1, 2, or 3."),
+        }
     }
-
-    // 4. Create sample file byte buffer (Vec<u8>)
-    let raw_data = String::from("Hello, Security World!").into_bytes();
-    println!("\nOriginal Text Bytes: {:?}", raw_data);
-
-    // 5. OWNERSHIP MOVE: `raw_data` is moved into `process_bytes`
-    let encrypted_data = engine.process_bytes(raw_data);
-
-    // UNCOMMENTING THIS LINE WILL CAUSE A COMPILER ERROR:
-    // println!("Raw data: {:?}", raw_data); 
-    // Reason: `raw_data` was consumed by `process_bytes`.
-
-    println!("Encrypted Bytes:    {:?}", encrypted_data);
-
-    // 6. Decrypting: XOR is symmetric, so processing encrypted_data again restores original
-    let decrypted_data = engine.process_bytes(encrypted_data);
-    let decrypted_text = String::from_utf8_lossy(&decrypted_data);
-
-    println!("Decrypted Text:     {}", decrypted_text);
 }
